@@ -2,6 +2,16 @@ import { loadGLTF } from "../libs/loader.js";
 import * as THREE from '../libs/three123/three.module.js';
 import { ARButton } from '../libs/jsm/ARButton.js';
 
+const normalizeModel = (obj, height) => {
+    const bbox = new THREE.Box3().setFromObject(obj);
+    const size = bbox.getSize(new THREE.Vector3());
+    obj.scale.multiplyScalar(height / size.y);
+
+    const bbox2 = new THREE.Box3().setFromObject(obj);
+    const center = bbox2.getCenter(new THREE.Vector3());
+    obj.position.set(-center.x, -center.y, -center.z);
+};
+
 document.addEventListener('DOMContentLoaded', () => {
     const initialize = async () => {
         const scene = new THREE.Scene();
@@ -19,112 +29,34 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.appendChild(renderer.domElement);
         document.body.appendChild(arButton);
 
-        const coffeeTable = await loadGLTF('../assets/models/coffee-table/scene.gltf');
-        scene.add(coffeeTable.scene);
+        const model = await loadGLTF('../assets/models/coffee-table/scene.gltf');
+        normalizeModel(model.scene, 0.5);
+        const chair = new THREE.Group();
+        chair.add(model.scene);
+        chair.visible = false;
+        scene.add(chair);
 
-        const materialIndices = {
-            0: {
-                name: 'Old_Steel_normal',
-                preview: '../assets/models/coffee-table/textures/Old_Steel_normal.png',
-                texture: '../assets/models/coffee-table/textures/Old_Steel_normal.png'
-            },
-            1: {
-                name: 'Table_wood_1_diffuse',
-                preview: '../assets/models/coffee-table/textures/Table_wood_1_diffuse.jpeg',
-                texture: '../assets/models/coffee-table/textures/Table_wood_1_diffuse.jpeg'
-            },
-            2: {
-                name: 'Old_Steel_specularGlossiness',
-                preview: '../assets/models/coffee-table/textures/Old_Steel_specularGlossiness.png',
-                texture: '../assets/models/coffee-table/textures/Old_Steel_specularGlossiness.png'
-            },
-            3: {
-                name: 'Table_wood_1_normal',
-                preview: '../assets/models/coffee-table/textures/Table_wood_1_normal.jpeg',
-                texture: '../assets/models/coffee-table/textures/Table_wood_1_normal.jpeg'
-            },
-        };
+        renderer.xr.addEventListener("sessionstart", async () => {
+            const session = renderer.xr.getSession();
+            const viewerReferenceSpace = await session.requestReferenceSpace("viewer");
+            const hitTestSource = await session.requestHitTestSource({ space: viewerReferenceSpace });
 
-        const newChoiceTextures = {
-            0: '../assets/models/coffee-table/textures/tx1.jpg',
-            1: '../assets/models/coffee-table/textures/tx2.jpg',
-            2: '../assets/models/coffee-table/textures/tx3.jpg',
-            3: '../assets/models/coffee-table/textures/tx4.jpg',
-        };
+            renderer.setAnimationLoop((timestamp, frame) => {
+                if (!frame) return;
 
-        const textureButtonsContainer = document.getElementById('texture-buttons-container');
-        const replaceRemoveButtons = document.getElementById('replace-remove-buttons');
-        const newChoiceButtonsContainer = document.getElementById('new-choice-buttons-container');
+                const referenceSpace = renderer.xr.getReferenceSpace();
+                const hitTestResults = frame.getHitTestResults(hitTestSource);
 
-        let selectedIndex = null;
+                if (hitTestResults.length && !chair.visible) {
+                    const hit = hitTestResults[0];
+                    const hitPose = hit.getPose(referenceSpace);
 
-        Object.keys(materialIndices).forEach((index) => {
-            const textureInfo = materialIndices[index];
+                    chair.visible = true;
+                    chair.position.setFromMatrixPosition(new THREE.Matrix4().fromArray(hitPose.transform.matrix));
+                }
 
-            const textureButton = document.createElement('img');
-            textureButton.src = textureInfo.preview;
-            textureButton.style.width = '80px';
-            textureButton.style.height = '80px';
-            textureButton.style.margin = '10px';
-            textureButtonsContainer.appendChild(textureButton);
-
-            textureButton.addEventListener('click', () => {
-                replaceRemoveButtons.style.display = 'block';
-                selectedIndex = index;
+                renderer.render(scene, camera);
             });
-        });
-
-        const replaceButton = document.getElementById('replace-button');
-        replaceButton.addEventListener('click', () => {
-            newChoiceButtonsContainer.style.display = 'block';
-            newChoiceButtonsContainer.innerHTML = ''; // Clear previous buttons
-
-            Object.keys(newChoiceTextures).forEach((index) => {
-                const newTextureButton = document.createElement('img');
-                newTextureButton.src = newChoiceTextures[index];
-                newTextureButton.style.width = '80px';
-                newTextureButton.style.height = '80px';
-                newTextureButton.style.margin = '10px';
-                newChoiceButtonsContainer.appendChild(newTextureButton);
-
-                newTextureButton.addEventListener('click', () => {
-                    if (selectedIndex !== null) {
-                        const textureLoader = new THREE.TextureLoader();
-                        coffeeTable.scene.traverse((child) => {
-                            if (child.isMesh && child.material instanceof Array) {
-                                const material = child.material[selectedIndex];
-                                if (material) {
-                                    material.map = textureLoader.load(newChoiceTextures[index]);
-                                    material.needsUpdate = true;
-                                }
-                            }
-                        });
-                        replaceRemoveButtons.style.display = 'none';
-                        newChoiceButtonsContainer.style.display = 'none';
-                    }
-                });
-            });
-        });
-
-        const removeButton = document.getElementById('remove-button');
-        removeButton.addEventListener('click', () => {
-            if (selectedIndex !== null) {
-                coffeeTable.scene.traverse((child) => {
-                    if (child.isMesh && child.material instanceof Array) {
-                        const material = child.material[selectedIndex];
-                        if (material) {
-                            material.map = null;
-                            material.needsUpdate = true;
-                        }
-                    }
-                });
-                replaceRemoveButtons.style.display = 'none';
-                newChoiceButtonsContainer.style.display = 'none';
-            }
-        });
-
-        renderer.setAnimationLoop(() => {
-            renderer.render(scene, camera);
         });
     };
 
